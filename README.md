@@ -76,7 +76,7 @@ python scripts\load-datasets.py
 
 What the script does:
 
-- Creates the `raw`, `curated`, `ml`, and `kafka-archive` buckets in MinIO
+- Creates the `raw`, `curated`, `ml-data` (or `ML_BUCKET` override), and `kafka-archive` buckets in MinIO
 - Downloads the Porto competition data through the Kaggle CLI
 - Downloads 3 months of NYC TLC Yellow Taxi parquet files
 - Uploads Porto CSV files to `raw/porto-trips/`
@@ -139,3 +139,30 @@ Low-bandwidth fallback (small sample datasets to unblock next issues):
 ```powershell
 python scripts\load-datasets.py --quick-mode
 ```
+
+## Milestone 1 Issue 3: Porto Profiling Notebook (Handoff)
+
+Notebook path:
+
+- `notebooks/issue-3-porto-profiling.ipynb`
+
+Current status:
+
+- Issue 3 analysis sections are complete and aligned with the checklist.
+- Sections `4.1` and `5.1` are now ordered correctly (heading first, code directly below).
+- Notebook was validated on quick-mode sample data.
+
+What is covered in the notebook:
+
+- Schema exploration (columns, dtypes, nulls, unique counts)
+- Statistical profiling (duration, call type percentages, missing data, trips per taxi)
+- Temporal profiling (trips/hour, day-of-week, weekend split, active taxis/hour, Friday 12-14 check, peak windows)
+- Spatial profiling (polyline parsing, start/end points, average trip distance, top origin/destination areas)
+- Required charts (demand curve, duration histogram, call type pie, origin density heatmap)
+- Key findings summary and notes
+
+Run with full data later:
+
+- The same notebook works for full Porto CSV files.
+- Prefer keeping only full CSV files in `data/downloads/porto` to avoid selecting `porto_sample.csv` by mistake.
+- Re-run all notebook cells from top after full ingestion.
