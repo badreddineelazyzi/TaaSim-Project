@@ -133,3 +133,9 @@ If you want different NYC months, pass them explicitly:
 ```powershell
 python scripts\load-datasets.py --nyc-months 2024-04 2024-05 2024-06
 ```
+
+Low-bandwidth fallback (small sample datasets to unblock next issues):
+
+```powershell
+python scripts\load-datasets.py --quick-mode
+```

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import shutil
@@ -57,12 +58,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--minio-secret-key", default=getenv("MINIO_SECRET_KEY", DEFAULT_MINIO_SECRET_KEY))
     parser.add_argument("--ml-bucket", default=getenv("ML_BUCKET", DEFAULT_ML_BUCKET))
     parser.add_argument("--mc-image", default=getenv("MC_IMAGE", DEFAULT_MC_IMAGE))
+    parser.add_argument("--quick-mode", action="store_true", help="Use tiny local sample datasets instead of full internet downloads.")
     return parser.parse_args()
 
 
 def run_command(command: list[str], message: str) -> None:
     print(message, flush=True)
-    completed = subprocess.run(command, check=False, capture_output=True, text=True)
+    completed = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     if completed.stdout:
         print(completed.stdout, end="")
     if completed.stderr:
@@ -117,6 +126,83 @@ def get_csv_files(root: Path) -> list[Path]:
     return sorted(root.rglob("*.csv"))
 
 
+def create_porto_sample_csv(porto_root: Path) -> None:
+    sample_file = porto_root / "porto_sample.csv"
+    rows: list[dict[str, object]] = []
+    for i in range(1, 101):
+        polyline = [
+            [-8.62 + (i * 0.00005), 41.15 + (i * 0.00004)],
+            [-8.619 + (i * 0.00005), 41.151 + (i * 0.00004)],
+            [-8.618 + (i * 0.00005), 41.152 + (i * 0.00004)],
+        ]
+        rows.append(
+            {
+                "TRIP_ID": f"SAMPLE_TRIP_{i}",
+                "CALL_TYPE": "A" if i % 3 == 0 else "B",
+                "ORIGIN_CALL": "",
+                "ORIGIN_STAND": "",
+                "TAXI_ID": str(200000 + i),
+                "TIMESTAMP": 1408032000 + (i * 60),
+                "DAY_TYPE": "A",
+                "MISSING_DATA": "False",
+                "POLYLINE": json.dumps(polyline),
+            }
+        )
+
+    header = [
+        "TRIP_ID",
+        "CALL_TYPE",
+        "ORIGIN_CALL",
+        "ORIGIN_STAND",
+        "TAXI_ID",
+        "TIMESTAMP",
+        "DAY_TYPE",
+        "MISSING_DATA",
+        "POLYLINE",
+    ]
+    with sample_file.open("w", encoding="utf-8", newline="") as f:
+        f.write(",".join(header) + "\n")
+        for row in rows:
+            escaped = []
+            for key in header:
+                value = str(row[key]).replace('"', '""')
+                escaped.append(f'"{value}"')
+            f.write(",".join(escaped) + "\n")
+
+
+def create_nyc_sample_parquet(nyc_root: Path, months: list[str]) -> None:
+    try:
+        import pandas as pd
+    except ImportError as exc:
+        raise SystemExit(
+            "Quick mode needs pandas + pyarrow. "
+            f"Import error: {exc}. Install with: python -m pip install pandas pyarrow"
+        ) from exc
+
+    for month in months:
+        sample_path = nyc_root / f"yellow_tripdata_{month}.parquet"
+        if sample_path.exists():
+            continue
+
+        records = []
+        for i in range(1, 151):
+            records.append(
+                {
+                    "VendorID": 1,
+                    "tpep_pickup_datetime": f"{month}-{(i % 28) + 1:02d} 08:{(i % 60):02d}:00",
+                    "tpep_dropoff_datetime": f"{month}-{(i % 28) + 1:02d} 08:{((i + 12) % 60):02d}:00",
+                    "passenger_count": (i % 4) + 1,
+                    "trip_distance": round(1.2 + ((i % 15) * 0.35), 3),
+                    "PULocationID": (i % 250) + 1,
+                    "DOLocationID": ((i + 20) % 250) + 1,
+                    "fare_amount": round(5.5 + ((i % 20) * 1.15), 2),
+                    "total_amount": round(8.0 + ((i % 20) * 1.35), 2),
+                }
+            )
+
+        pd.DataFrame.from_records(records).to_parquet(sample_path, index=False)
+
+
 def main() -> None:
     args = parse_args()
     download_root = Path(args.download_root)
@@ -152,7 +238,11 @@ def main() -> None:
     for bucket in ("raw", "curated", args.ml_bucket, "kafka-archive"):
         run_mc(["mb", "-p", f"{args.minio_alias}/{bucket}"], f"Ensuring bucket: {bucket}", [], args.mc_image)
 
-    if not get_csv_files(porto_root):
+    if args.quick_mode:
+        print("Quick mode enabled: creating local sample datasets.", flush=True)
+        if not get_csv_files(porto_root):
+            create_porto_sample_csv(porto_root)
+    elif not get_csv_files(porto_root):
         run_kaggle(["competitions", "download", "-c", args.kaggle_competition, "-p", str(porto_root)], "Downloading Porto competition dataset from Kaggle")
 
         for zip_path in sorted(porto_root.glob("*.zip")):
@@ -168,6 +258,9 @@ def main() -> None:
     reset_directory(porto_upload_root)
     for csv_file in porto_csv_files:
         shutil.copy2(csv_file, porto_upload_root / csv_file.name)
+
+    if args.quick_mode:
+        create_nyc_sample_parquet(nyc_root, args.nyc_months)
 
     nyc_parquet_files: list[Path] = []
     for month in args.nyc_months:
@@ -189,13 +282,13 @@ def main() -> None:
     nyc_mount = f"{nyc_upload_root.resolve()}:/data/nyc-upload"
 
     run_mc(
-        ["cp", "--recursive", "/data/porto-upload/.", f"{args.minio_alias}/raw/porto-trips/"],
+        ["mirror", "--overwrite", "/data/porto-upload", f"{args.minio_alias}/raw/porto-trips/"],
         "Uploading Porto CSV files to MinIO",
         [porto_mount],
         args.mc_image,
     )
     run_mc(
-        ["cp", "--recursive", "/data/nyc-upload/.", f"{args.minio_alias}/raw/nyc-tlc/"],
+        ["mirror", "--overwrite", "/data/nyc-upload", f"{args.minio_alias}/raw/nyc-tlc/"],
         "Uploading NYC TLC parquet files to MinIO",
         [nyc_mount],
         args.mc_image,
