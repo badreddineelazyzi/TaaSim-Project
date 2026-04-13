@@ -10,9 +10,10 @@ services:
       - KAFKA_NODE_ID=1
       - KAFKA_PROCESS_ROLES=broker,controller
       - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
-      - KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
-      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
-      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_LISTENERS=INTERNAL://:19092,EXTERNAL://:9092,CONTROLLER://:9093
+      - KAFKA_ADVERTISED_LISTENERS=INTERNAL://kafka:19092,EXTERNAL://localhost:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
       - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
       - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
@@ -153,6 +154,7 @@ services:
       - "${SPARK_MASTER_PORT:-7077}:7077"
       - "${SPARK_MASTER_UI_PORT:-8080}:8080"
     environment:
+      - SPARK_LOCAL_HOSTNAME=spark-master
       - SPARK_DAEMON_MEMORY=${SPARK_DAEMON_MEMORY:-1g}
       - SPARK_MASTER_OPTS=-Dspark.hadoop.fs.s3a.endpoint=http://minio:${MINIO_PORT:-9000} -Dspark.hadoop.fs.s3a.path.style.access=true -Dspark.hadoop.fs.s3a.access.key=${MINIO_ROOT_USER:-minioadmin} -Dspark.hadoop.fs.s3a.secret.key=${MINIO_ROOT_PASSWORD:-minioadmin123} -Dspark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem -Dspark.hadoop.fs.s3a.connection.ssl.enabled=false
     healthcheck:
@@ -181,6 +183,7 @@ services:
       spark-master:
         condition: service_healthy
     environment:
+      - SPARK_LOCAL_HOSTNAME=spark-worker
       - SPARK_MASTER=spark://spark-master:7077
       - SPARK_WORKER_MEMORY=${SPARK_WORKER_MEMORY:-1G}
       - SPARK_WORKER_CORES=${SPARK_WORKER_CORES:-1}
