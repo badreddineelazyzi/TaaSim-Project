@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import shlex
@@ -218,10 +219,8 @@ def main() -> None:
     if shutil.which("docker") is None:
         raise SystemExit("Docker is required but was not found in PATH.")
 
-    try:
-        import kaggle  # noqa: F401
-    except ImportError as exc:
-        raise SystemExit("Kaggle package is required. Install it and configure kaggle.json first.") from exc
+    if importlib.util.find_spec("kaggle") is None:
+        raise SystemExit("Kaggle package is required. Install it and configure kaggle.json first.")
 
     kaggle_username = os.environ.get("KAGGLE_USERNAME")
     kaggle_key = os.environ.get("KAGGLE_KEY")

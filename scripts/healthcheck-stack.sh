@@ -11,11 +11,11 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 echo "[1/6] Kafka topic listing"
-docker compose -f "${COMPOSE_FILE}" exec -T kafka kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" docker compose -f "${COMPOSE_FILE}" exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null
 echo "  OK"
 
 echo "[2/6] MinIO accessibility via mc"
-docker run --rm --network taasim-net "${MC_IMAGE}" sh -c "mc alias set local http://minio:9000 minioadmin minioadmin123 >/dev/null && mc ls local >/dev/null"
+docker run --rm --network taasim-net -e MC_HOST_local="http://minioadmin:minioadmin123@minio:9000" "${MC_IMAGE}" ls local >/dev/null
 echo "  OK"
 
 echo "[3/6] Cassandra cqlsh connectivity"
@@ -27,7 +27,7 @@ docker compose -f "${COMPOSE_FILE}" exec -T flink-jobmanager flink list >/dev/nu
 echo "  OK"
 
 echo "[5/6] Spark shell launch check"
-docker compose -f "${COMPOSE_FILE}" exec -T spark-master bash -lc "echo 'println(\"spark-shell ready\"); System.exit(0)' >/tmp/healthcheck.scala; spark-shell -i /tmp/healthcheck.scala >/dev/null"
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*" docker compose -f "${COMPOSE_FILE}" exec -T spark-master bash -lc "echo 'println(\"spark-shell ready\"); System.exit(0)' >/tmp/healthcheck.scala; /opt/spark/bin/spark-shell -i /tmp/healthcheck.scala >/dev/null"
 echo "  OK"
 
 echo "[6/6] Grafana health endpoint"

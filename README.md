@@ -68,6 +68,8 @@ docker compose down -v
 
 ## Milestone 1 Issue 2: Dataset Load
 
+If you already uploaded Porto and NYC files manually to MinIO (`raw/porto-trips/` and `raw/nyc-tlc/`), you can skip this step.
+
 Use the Python loader to create the MinIO buckets and upload the datasets:
 
 ```powershell
