@@ -145,18 +145,21 @@ services:
     command: >
       bash -lc "
       set -e;
-      mkdir -p /tmp/spark-extra-jars;
-      test -f /tmp/spark-extra-jars/hadoop-aws-3.3.4.jar || curl -fsSL https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar -o /tmp/spark-extra-jars/hadoop-aws-3.3.4.jar;
-      test -f /tmp/spark-extra-jars/aws-java-sdk-bundle-1.12.262.jar || curl -fsSL https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar -o /tmp/spark-extra-jars/aws-java-sdk-bundle-1.12.262.jar;
-      export SPARK_CLASSPATH=/tmp/spark-extra-jars/hadoop-aws-3.3.4.jar:/tmp/spark-extra-jars/aws-java-sdk-bundle-1.12.262.jar;
+      test -f /opt/spark/jars/hadoop-aws-3.3.4.jar || curl -fsSL https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar -o /opt/spark/jars/hadoop-aws-3.3.4.jar;
+      test -f /opt/spark/jars/aws-java-sdk-bundle-1.12.262.jar || curl -fsSL https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar -o /opt/spark/jars/aws-java-sdk-bundle-1.12.262.jar;
       /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master --host spark-master --port 7077 --webui-port 8080"
+    depends_on:
+      minio:
+        condition: service_healthy
     ports:
       - "${SPARK_MASTER_PORT:-7077}:7077"
       - "${SPARK_MASTER_UI_PORT:-8080}:8080"
     environment:
       - SPARK_LOCAL_HOSTNAME=spark-master
       - SPARK_DAEMON_MEMORY=${SPARK_DAEMON_MEMORY:-1g}
+      - SPARK_EXTRA_CLASSPATH=/opt/spark/jars/hadoop-aws-3.3.4.jar:/opt/spark/jars/aws-java-sdk-bundle-1.12.262.jar
       - SPARK_MASTER_OPTS=-Dspark.hadoop.fs.s3a.endpoint=http://minio:${MINIO_PORT:-9000} -Dspark.hadoop.fs.s3a.path.style.access=true -Dspark.hadoop.fs.s3a.access.key=${MINIO_ROOT_USER:-minioadmin} -Dspark.hadoop.fs.s3a.secret.key=${MINIO_ROOT_PASSWORD:-minioadmin123} -Dspark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem -Dspark.hadoop.fs.s3a.connection.ssl.enabled=false
+      - SPARK_SUBMIT_OPTS=-Dspark.hadoop.fs.s3a.endpoint=http://minio:${MINIO_PORT:-9000} -Dspark.hadoop.fs.s3a.path.style.access=true -Dspark.hadoop.fs.s3a.access.key=${MINIO_ROOT_USER:-minioadmin} -Dspark.hadoop.fs.s3a.secret.key=${MINIO_ROOT_PASSWORD:-minioadmin123} -Dspark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem -Dspark.hadoop.fs.s3a.connection.ssl.enabled=false
     healthcheck:
       test: ["CMD-SHELL", "/opt/spark/bin/spark-submit --version >/dev/null 2>&1 || exit 1"]
       interval: 30s
@@ -174,20 +177,22 @@ services:
     command: >
       bash -lc "
       set -e;
-      mkdir -p /tmp/spark-extra-jars;
-      test -f /tmp/spark-extra-jars/hadoop-aws-3.3.4.jar || curl -fsSL https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar -o /tmp/spark-extra-jars/hadoop-aws-3.3.4.jar;
-      test -f /tmp/spark-extra-jars/aws-java-sdk-bundle-1.12.262.jar || curl -fsSL https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar -o /tmp/spark-extra-jars/aws-java-sdk-bundle-1.12.262.jar;
-      export SPARK_CLASSPATH=/tmp/spark-extra-jars/hadoop-aws-3.3.4.jar:/tmp/spark-extra-jars/aws-java-sdk-bundle-1.12.262.jar;
+      test -f /opt/spark/jars/hadoop-aws-3.3.4.jar || curl -fsSL https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar -o /opt/spark/jars/hadoop-aws-3.3.4.jar;
+      test -f /opt/spark/jars/aws-java-sdk-bundle-1.12.262.jar || curl -fsSL https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar -o /opt/spark/jars/aws-java-sdk-bundle-1.12.262.jar;
       /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker --webui-port 8082 spark://spark-master:7077"
     depends_on:
       spark-master:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     environment:
       - SPARK_LOCAL_HOSTNAME=spark-worker
       - SPARK_MASTER=spark://spark-master:7077
       - SPARK_WORKER_MEMORY=${SPARK_WORKER_MEMORY:-1G}
       - SPARK_WORKER_CORES=${SPARK_WORKER_CORES:-1}
+      - SPARK_EXTRA_CLASSPATH=/opt/spark/jars/hadoop-aws-3.3.4.jar:/opt/spark/jars/aws-java-sdk-bundle-1.12.262.jar
       - SPARK_DAEMON_JAVA_OPTS=-Dspark.hadoop.fs.s3a.endpoint=http://minio:${MINIO_PORT:-9000} -Dspark.hadoop.fs.s3a.path.style.access=true -Dspark.hadoop.fs.s3a.access.key=${MINIO_ROOT_USER:-minioadmin} -Dspark.hadoop.fs.s3a.secret.key=${MINIO_ROOT_PASSWORD:-minioadmin123} -Dspark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem -Dspark.hadoop.fs.s3a.connection.ssl.enabled=false
+      - SPARK_SUBMIT_OPTS=-Dspark.hadoop.fs.s3a.endpoint=http://minio:${MINIO_PORT:-9000} -Dspark.hadoop.fs.s3a.path.style.access=true -Dspark.hadoop.fs.s3a.access.key=${MINIO_ROOT_USER:-minioadmin} -Dspark.hadoop.fs.s3a.secret.key=${MINIO_ROOT_PASSWORD:-minioadmin123} -Dspark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem -Dspark.hadoop.fs.s3a.connection.ssl.enabled=false
     mem_limit: 768m
     cpus: 0.75
     networks:
