@@ -1,0 +1,38 @@
+# Virtual environments
+.venv/
+.venv-1/
+
+# Data files (large)
+data/downloads/
+data/porto-trips/
+data/nyc-tlc/
+*.parquet
+!data/zone_mapping.csv
+
+# Environment secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+*.log
+flink-logs.txt
+compose-ps.txt
+test_output.txt
+reflog.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
