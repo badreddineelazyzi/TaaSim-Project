@@ -11,7 +11,7 @@ data/nyc-tlc/
 
 # Environment secrets
 .env
-
+*.html
 # Python
 __pycache__/
 *.pyc
