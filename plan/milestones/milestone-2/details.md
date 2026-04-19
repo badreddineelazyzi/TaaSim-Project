@@ -8,7 +8,7 @@
 
 ## Objectives
 
-- [ ] MinIO bucket structure finalized: `raw/`, `curated/`, `ml/`, `kafka-archive/`
+- [ ] MinIO bucket structure finalized: `raw/`, `curated/`, `ml-data/`, `kafka-archive/`
 - [ ] Kafka Connect S3 Sink mirroring raw topics to MinIO
 - [ ] Cassandra keyspace and tables deployed with justified partition keys
 - [ ] Architecture Decision Record (ADR) written and submitted

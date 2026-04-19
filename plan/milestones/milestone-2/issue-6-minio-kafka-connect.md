@@ -21,7 +21,7 @@ raw/
 curated/
   porto-trips/          # Cleaned + geo-enriched trips (Parquet)
   demand-by-zone/       # NYC aggregated demand
-ml/
+ml-data/
   features/             # Feature matrix for ML training
   models/
     demand_v1/          # Trained GBT model artifact
@@ -42,3 +42,7 @@ ml/
 - [ ] Kafka Connect S3 Sink is running and healthy
 - [ ] After 5 minutes of producer activity, Kafka archive files visible in MinIO
 - [ ] Files are in a queryable format (JSON or Avro with proper partitioning)
+
+## Note
+
+- MinIO bucket names must be at least 3 characters, so this project uses `ml-data/` instead of `ml/`.

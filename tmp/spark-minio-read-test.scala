@@ -1,0 +1,11 @@
+val tripsPath = "s3a://raw/kafka-archive/raw.trips/*/*.json"
+val tripsDf = spark.read.json(tripsPath)
+println("SPARK_MINIO_READ_TEST_PATH=" + tripsPath)
+println("SPARK_MINIO_READ_TEST_COUNT=" + tripsDf.count())
+println("SPARK_MINIO_READ_TEST_SCHEMA_START")
+tripsDf.printSchema()
+println("SPARK_MINIO_READ_TEST_SCHEMA_END")
+println("SPARK_MINIO_READ_TEST_SAMPLE_START")
+tripsDf.select("trip_id", "origin_zone", "destination_zone", "requested_at", "call_type", "late_arrival").show(5, false)
+println("SPARK_MINIO_READ_TEST_SAMPLE_END")
+System.exit(0)
