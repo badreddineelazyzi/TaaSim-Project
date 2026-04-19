@@ -85,9 +85,19 @@ def main():
                         help="Kafka bootstrap servers")
     parser.add_argument("--topic", type=str, default="raw.gps",
                         help="Kafka topic to publish to")
+    parser.add_argument("--sample-ratio", type=float, default=1.0,
+                        help="Fraction of trips to replay in (0,1]. Default=1.0")
     parser.add_argument("--max-trips", type=int, default=0,
                         help="Max trips to replay (0 = all)")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Optional random seed for reproducible sampling/shuffle")
     args = parser.parse_args()
+
+    if not (0 < args.sample_ratio <= 1.0):
+        raise ValueError("--sample-ratio must be > 0 and <= 1.0")
+
+    if args.seed is not None:
+        random.seed(args.seed)
 
     producer = KafkaProducer(
         bootstrap_servers=args.kafka,
@@ -105,6 +115,17 @@ def main():
         all_rows = list(reader)
 
     random.shuffle(all_rows)
+
+    if args.sample_ratio < 1.0 and all_rows:
+        sample_size = max(1, int(len(all_rows) * args.sample_ratio))
+        all_rows = random.sample(all_rows, sample_size)
+        random.shuffle(all_rows)
+
+    print(
+        f"Vehicle GPS Producer started - speed={args.speed}x, "
+        f"rows_selected={len(all_rows)}, sample_ratio={args.sample_ratio}"
+        + (f", seed={args.seed}" if args.seed is not None else "")
+    )
 
     trip_count = 0
     for row in all_rows:

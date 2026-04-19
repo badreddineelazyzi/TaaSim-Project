@@ -81,7 +81,17 @@ def main():
                         help="Simulated hour of day (0-23). -1 = use real clock")
     parser.add_argument("--sim-weekday", type=int, default=-1,
                         help="Simulated weekday (0=Mon..6=Sun). -1 = use real clock")
+    parser.add_argument("--late-prob", type=float, default=0.03,
+                        help="Probability of late/out-of-order events in [0,1]")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Optional random seed for reproducible output")
     args = parser.parse_args()
+
+    if not (0.0 <= args.late_prob <= 1.0):
+        raise ValueError("--late-prob must be between 0.0 and 1.0")
+
+    if args.seed is not None:
+        random.seed(args.seed)
 
     producer = KafkaProducer(
         bootstrap_servers=args.kafka,
@@ -90,7 +100,8 @@ def main():
     )
 
     print(f"Trip Request Producer started — base rate={args.rate} evt/s, "
-          f"duration={args.duration}s")
+          f"duration={args.duration}s, late_prob={args.late_prob}"
+          + (f", seed={args.seed}" if args.seed is not None else ""))
 
     start = time.time()
     sent = 0
@@ -119,8 +130,8 @@ def main():
                   f"hour={sim_hour} weekday={sim_weekday} "
                   f"multiplier={multiplier:.2f} rate={effective_rate:.1f}/s")
 
-        # Deliberately generate ~3% out-of-order events (3 min delay)
-        if random.random() < 0.03:
+        # Deliberately generate out-of-order events (3 min delay)
+        if random.random() < args.late_prob:
             late_trip = generate_trip(sim_ts - 180)
             late_trip["late_arrival"] = True
             producer.send(args.topic, key=late_trip["trip_id"], value=late_trip)
