@@ -18,6 +18,7 @@ import uuid
 from datetime import datetime, timezone
 
 from kafka import KafkaProducer
+import requests
 
 # ---------------------------------------------------------------------------
 # Porto → Casablanca coordinate transformation (same as issue4)
@@ -40,6 +41,7 @@ BLACKOUT_PROB   = 0.05     # 5 % chance per vehicle per event
 BLACKOUT_MIN_S  = 60
 BLACKOUT_MAX_S  = 180
 REAL_INTERVAL_S = 15       # Porto dataset: 1 point every 15 seconds
+OSRM_NEAREST_URL = "http://127.0.0.1:5000/nearest/v1/driving"
 
 
 def transform_point(lon, lat):
@@ -71,6 +73,26 @@ def compute_speed(prev_lon, prev_lat, cur_lon, cur_lat, dt_seconds):
     c = 2 * math.asin(math.sqrt(a))
     dist_km = R * c
     return (dist_km / dt_seconds) * 3600
+
+
+def snap_to_road(lon, lat):
+    """
+    Calls the local OSRM Nearest API to snap coordinates to the road network.
+    """
+    url = f"{OSRM_NEAREST_URL}/{lon},{lat}?number=1"
+    try:
+        response = requests.get(url, timeout=2)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("code") == "Ok" and data.get("waypoints"):
+                snapped_lon = data["waypoints"][0]["location"][0]
+                snapped_lat = data["waypoints"][0]["location"][1]
+                return snapped_lon, snapped_lat
+    except Exception as e:
+        print(f"[OSRM Warning] Failed to snap coordinates: {e}")
+
+    # Fallback to raw coordinates if OSRM fails or road not found
+    return lon, lat
 
 
 def main():
@@ -153,6 +175,8 @@ def main():
             c_lon, c_lat = transform_point(lon, lat)
             # Add noise
             c_lon, c_lat = add_noise(c_lon, c_lat)
+            # Snap to nearest drivable road segment via local OSRM
+            c_lon, c_lat = snap_to_road(c_lon, c_lat)
 
             event_ts = base_ts + idx * REAL_INTERVAL_S
             speed = 0.0

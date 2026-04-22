@@ -8,6 +8,7 @@ data/porto-trips/
 data/nyc-tlc/
 *.parquet
 !data/zone_mapping.csv
+osrm_data/
 
 # Environment secrets
 .env
@@ -36,3 +37,5 @@ Thumbs.db
 
 # Jupyter checkpoints
 .ipynb_checkpoints/
+# documentation
+mySheetPiper.md
