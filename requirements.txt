@@ -8,3 +8,4 @@ pyarrow>=14.0.0
 folium>=0.14.0
 notebook>=7.0.0
 kafka-python>=2.0.0
+requests>=2.31.0

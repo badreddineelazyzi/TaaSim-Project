@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime, timezone
 
 from kafka import KafkaProducer
-
+import requests
 # ---------------------------------------------------------------------------
 # Porto → Casablanca coordinate transformation (same as issue4)
 # ---------------------------------------------------------------------------
@@ -40,6 +40,7 @@ BLACKOUT_PROB   = 0.05     # 5 % chance per vehicle per event
 BLACKOUT_MIN_S  = 60
 BLACKOUT_MAX_S  = 180
 REAL_INTERVAL_S = 15       # Porto dataset: 1 point every 15 seconds
+OSRM_NEAREST_URL = "http://127.0.0.1:5000/nearest/v1/driving"
 
 
 def transform_point(lon, lat):
@@ -71,6 +72,27 @@ def compute_speed(prev_lon, prev_lat, cur_lon, cur_lat, dt_seconds):
     c = 2 * math.asin(math.sqrt(a))
     dist_km = R * c
     return (dist_km / dt_seconds) * 3600
+
+
+def snap_to_road(lon, lat):
+    """
+    Calls the local OSRM Nearest API to snap coordinates to the road network.
+    """
+    url = f"{OSRM_NEAREST_URL}/{lon},{lat}?number=1"
+    try:
+        response = requests.get(url, timeout=2)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("code") == "Ok" and data.get("waypoints"):
+                snapped_lon = data["waypoints"][0]["location"][0]
+                snapped_lat = data["waypoints"][0]["location"][1]
+                return snapped_lon, snapped_lat
+    except Exception as e:
+        print(f"[OSRM Warning] Failed to snap coordinates: {e}")
+
+    # Fallback to raw coordinates if OSRM fails or road not found
+    return lon, lat
+
 
 
 def main():
@@ -109,10 +131,15 @@ def main():
     sent = 0
     delayed_msgs = []  # (send_at_epoch, key, payload)
 
-    # Load all rows first, then shuffle for random trip selection
+    print("Loading CSV data (this may take a moment)...")
+    all_rows = []
     with open(args.csv, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        all_rows = list(reader)
+        for row in reader:
+            all_rows.append(row)
+            # Stop loading early if testing with max_trips to avoid RAM explosion
+            if args.max_trips > 0 and len(all_rows) > args.max_trips * 5:
+                break
 
     random.shuffle(all_rows)
 
@@ -153,18 +180,24 @@ def main():
             c_lon, c_lat = transform_point(lon, lat)
             # Add noise
             c_lon, c_lat = add_noise(c_lon, c_lat)
+            # Snap to nearest drivable road segment via local OSRM
+            c_lon, c_lat = snap_to_road(c_lon, c_lat)
 
+            # Keep event_ts just for local calculation if needed, but we won't use it in payload
             event_ts = base_ts + idx * REAL_INTERVAL_S
             speed = 0.0
             if prev_lon is not None:
                 speed = compute_speed(prev_lon, prev_lat, c_lon, c_lat,
                                       REAL_INTERVAL_S)
 
+            # --- L-QALEB HNA: S-sa3a d-DABA (True Live Data) ---
+            current_now = time.time()
+
             payload = {
                 "taxi_id": taxi_id,
                 "trip_id": trip_id,
-                "timestamp": event_ts,
-                "event_time": datetime.fromtimestamp(event_ts, tz=timezone.utc).isoformat(),
+                "timestamp": int(current_now),
+                "event_time": datetime.fromtimestamp(current_now, tz=timezone.utc).isoformat(),
                 "lat": round(c_lat, 6),
                 "lon": round(c_lon, 6),
                 "speed": round(speed, 2),

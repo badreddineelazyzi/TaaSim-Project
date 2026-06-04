@@ -8,6 +8,7 @@ data/porto-trips/
 data/nyc-tlc/
 *.parquet
 !data/zone_mapping.csv
+osrm_data/
 
 # Environment secrets
 .env
@@ -19,10 +20,20 @@ __pycache__/
 
 # Logs
 *.log
+flink_logs.txt
 flink-logs.txt
+tm_errors.txt
+error_status.*
+exceptions*
 compose-ps.txt
 test_output.txt
 reflog.txt
+
+# Java / Maven
+target/
+*.class
+*.jar
+flink-libs/
 
 # IDE
 .vscode/
@@ -36,3 +47,5 @@ Thumbs.db
 
 # Jupyter checkpoints
 .ipynb_checkpoints/
+# documentation
+mySheetPiper.md
