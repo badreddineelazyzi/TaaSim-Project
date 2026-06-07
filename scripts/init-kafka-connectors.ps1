@@ -33,7 +33,7 @@ Write-Host "S3 plugin available."
 $config = @{
     "connector.class"                = "io.confluent.connect.s3.S3SinkConnector"
     "tasks.max"                      = "2"
-    "topics"                         = "raw.gps,raw.trips"
+    "topics"                         = "raw.gps,raw.trips,processed.gps,processed.demand,processed.matches,processed.unmatched"
     "s3.region"                      = "us-east-1"
     "s3.bucket.name"                 = "raw"
     "s3.part.size"                   = "5242880"

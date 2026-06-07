@@ -49,3 +49,8 @@ Thumbs.db
 .ipynb_checkpoints/
 # documentation
 mySheetPiper.md
+
+# Testing scripts (not for GitHub)
+/scripts/Testing/
+
+*/*/*/Testing/

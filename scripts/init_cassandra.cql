@@ -44,6 +44,8 @@ CREATE TABLE taasim.demand_zones (
     pending_requests int,
     ratio double,
     forecasted_demand double,
+    centroid_lat double,
+    centroid_lon double,
     PRIMARY KEY ((city, zone_id), window_start)
 ) WITH CLUSTERING ORDER BY (window_start DESC);
 
