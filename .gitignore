@@ -9,6 +9,9 @@ data/nyc-tlc/
 *.parquet
 !data/zone_mapping.csv
 osrm_data/
+data/road_cache/
+cache/
+osrm_cache/
 
 # Environment secrets
 .env
@@ -49,3 +52,8 @@ Thumbs.db
 .ipynb_checkpoints/
 # documentation
 mySheetPiper.md
+
+# Testing scripts (not for GitHub)
+/scripts/Testing/
+
+*/*/*/Testing/
