@@ -193,13 +193,13 @@ services:
     environment:
       - SPARK_LOCAL_HOSTNAME=spark-worker
       - SPARK_MASTER=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=${SPARK_WORKER_MEMORY:-1G}
-      - SPARK_WORKER_CORES=${SPARK_WORKER_CORES:-1}
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
       - SPARK_EXTRA_CLASSPATH=/opt/spark/jars/hadoop-aws-3.3.4.jar:/opt/spark/jars/aws-java-sdk-bundle-1.12.262.jar
       - SPARK_DAEMON_JAVA_OPTS=-Dspark.hadoop.fs.s3a.endpoint=http://minio:${MINIO_PORT:-9000} -Dspark.hadoop.fs.s3a.path.style.access=true -Dspark.hadoop.fs.s3a.access.key=${MINIO_ROOT_USER:-minioadmin} -Dspark.hadoop.fs.s3a.secret.key=${MINIO_ROOT_PASSWORD:-minioadmin123} -Dspark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem -Dspark.hadoop.fs.s3a.connection.ssl.enabled=false
       - SPARK_SUBMIT_OPTS=-Dspark.hadoop.fs.s3a.endpoint=http://minio:${MINIO_PORT:-9000} -Dspark.hadoop.fs.s3a.path.style.access=true -Dspark.hadoop.fs.s3a.access.key=${MINIO_ROOT_USER:-minioadmin} -Dspark.hadoop.fs.s3a.secret.key=${MINIO_ROOT_PASSWORD:-minioadmin123} -Dspark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem -Dspark.hadoop.fs.s3a.connection.ssl.enabled=false
-    mem_limit: 768m
-    cpus: 0.75
+    mem_limit: 2g
+    cpus: 2.0
     networks:
       - taasim-net
 
