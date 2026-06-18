@@ -75,117 +75,112 @@ def main():
     print(f"Reading raw Porto CSV from {args.input_path}...")
     df = spark.read.option("header", "true").option("inferSchema", "true").csv(args.input_path)
 
-    polyline_schema = ArrayType(ArrayType(DoubleType()))
-    df = df.withColumn("coords", F.from_json(F.col("POLYLINE"), polyline_schema))
-
-    df = df.filter(
-        (F.col("MISSING_DATA") == False) &
-        F.col("coords").isNotNull() &
-        (F.size("coords") > 0)
-    )
+    df = df.filter(F.col("MISSING_DATA") == False)
+    df = df.limit(5000)
     df = df.dropDuplicates(["TRIP_ID"])
 
-    temporal = df.select(
-        "TRIP_ID",
-        F.from_unixtime(F.col("TIMESTAMP")).cast(TimestampType()).alias("trip_datetime")
-    ).withColumn("hour_of_day", F.hour("trip_datetime")
-    ).withColumn("day_of_week", F.dayofweek("trip_datetime")
-    ).withColumn("year_month", F.date_format("trip_datetime", "yyyy-MM"))
+    # Remove parsing of coords to avoid memory/serialization explosion
+    # df = df.withColumn("coords", F.from_json(F.col("POLYLINE"), polyline_schema))
+    # df = df.filter(F.col("coords").isNotNull() & (F.size("coords") > 0))
 
-    df = df.withColumn("trip_duration_sec", F.size("coords") * 15)
+    df = df.withColumn("trip_datetime", F.from_unixtime(F.col("TIMESTAMP")).cast(TimestampType()))
+    df = df.withColumn("hour_of_day", F.hour("trip_datetime"))
+    df = df.withColumn("day_of_week", F.dayofweek("trip_datetime"))
+    df = df.withColumn("year_month", F.date_format("trip_datetime", "yyyy-MM"))
 
-    df_exploded = df.select(
-        "*", F.posexplode("coords").alias("pos", "coord")
-    )
-    df_exploded = df_exploded.withColumn("porto_lon", F.col("coord")[0])
-    df_exploded = df_exploded.withColumn("porto_lat", F.col("coord")[1])
+    # duration will be calculated in UDF
 
-    porto_lon_clamped = (
-        F.when(F.col("porto_lon") < F.lit(PORTO_LON_MIN), F.lit(PORTO_LON_MIN))
-        .when(F.col("porto_lon") > F.lit(PORTO_LON_MAX), F.lit(PORTO_LON_MAX))
-        .otherwise(F.col("porto_lon"))
-    )
-    porto_lat_clamped = (
-        F.when(F.col("porto_lat") < F.lit(PORTO_LAT_MIN), F.lit(PORTO_LAT_MIN))
-        .when(F.col("porto_lat") > F.lit(PORTO_LAT_MAX), F.lit(PORTO_LAT_MAX))
-        .otherwise(F.col("porto_lat"))
-    )
+    import math
+    import json
+    from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 
-    df_exploded = df_exploded.withColumn(
-        "casa_lon",
-        F.lit(casa_lon_min) + ((porto_lon_clamped - F.lit(PORTO_LON_MIN))
-                               / F.lit(PORTO_LON_MAX - PORTO_LON_MIN))
-        * F.lit(casa_lon_max - casa_lon_min)
-    ).withColumn(
-        "casa_lat",
-        F.lit(casa_lat_min) + ((porto_lat_clamped - F.lit(PORTO_LAT_MIN))
-                               / F.lit(PORTO_LAT_MAX - PORTO_LAT_MIN))
-        * F.lit(casa_lat_max - casa_lat_min)
-    )
-
-    w = Window.partitionBy("TRIP_ID").orderBy("pos")
-    df_exploded = df_exploded.withColumn("prev_porto_lon", F.lag("porto_lon").over(w))
-    df_exploded = df_exploded.withColumn("prev_porto_lat", F.lag("porto_lat").over(w))
-
-    lat1_r = F.radians(F.col("prev_porto_lat"))
-    lat2_r = F.radians(F.col("porto_lat"))
-    lon1_r = F.radians(F.col("prev_porto_lon"))
-    lon2_r = F.radians(F.col("porto_lon"))
-    dlat = lat2_r - lat1_r
-    dlon = lon2_r - lon1_r
-    a = F.pow(F.sin(dlat / 2), 2) + F.cos(lat1_r) * F.cos(lat2_r) * F.pow(F.sin(dlon / 2), 2)
-    seg_dist = F.lit(2 * EARTH_RADIUS_KM) * F.asin(F.sqrt(a))
-    seg_dist = F.when(F.col("prev_porto_lon").isNotNull(), seg_dist).otherwise(F.lit(0.0))
-    df_exploded = df_exploded.withColumn("segment_km", seg_dist)
-
-    df_exploded = df_exploded.withColumn(
-        "trip_distance_km", F.sum("segment_km").over(Window.partitionBy("TRIP_ID"))
-    )
-
-    trip_distance = df_exploded.groupBy("TRIP_ID").agg(
-        F.max("trip_distance_km").alias("trip_distance_km")
-    )
-
-    casa_polylines = df_exploded.groupBy("TRIP_ID").agg(
-        F.collect_list(F.struct(F.col("pos"), F.col("casa_lon"), F.col("casa_lat"))).alias("pts")
-    ).withColumn(
-        "pts_sorted",
-        F.expr("transform(array_sort(pts), x -> array(x.casa_lon, x.casa_lat))")
-    ).withColumn("POLYLINE", F.to_json(F.col("pts_sorted")))
-
-    df_start = df_exploded.filter(F.col("pos") == 0).select(
-        "TRIP_ID",
-        F.col("casa_lon").alias("start_lon"),
-        F.col("casa_lat").alias("start_lat")
-    )
-
-    zone_candidates = F.array(*[
-        F.struct(
-            (F.pow(F.col("start_lat") - F.lit(z["lat"]), 2)
-             + F.pow(F.col("start_lon") - F.lit(z["lon"]), 2)).alias("dist"),
-            F.lit(z["zone_id"]).alias("zone_id"),
-        )
-        for z in zones
+    out_schema = StructType([
+        StructField("trip_distance_km", DoubleType(), True),
+        StructField("new_polyline", StringType(), True),
+        StructField("CASA_ORIGIN_ZONE", IntegerType(), True),
+        StructField("trip_duration_sec", IntegerType(), True)
     ])
 
-    df_zones = df_start.withColumn(
-        "CASA_ORIGIN_ZONE",
-        F.element_at(F.array_sort(zone_candidates), 1).getField("zone_id")
-    )
+    @F.udf(returnType=out_schema)
+    def process_trip_udf(polyline_str):
+        if not polyline_str or polyline_str == '[]':
+            return None
+            
+        try:
+            coords = json.loads(polyline_str)
+        except:
+            return None
+            
+        if not coords:
+            return None
+            
+        casa_pts = []
+        trip_distance_km = 0.0
+        prev_porto_lon = None
+        prev_porto_lat = None
+        
+        for coord in coords:
+            if not coord or len(coord) < 2:
+                continue
+            porto_lon, porto_lat = coord[0], coord[1]
+            
+            c_lon = max(PORTO_LON_MIN, min(porto_lon, PORTO_LON_MAX))
+            c_lat = max(PORTO_LAT_MIN, min(porto_lat, PORTO_LAT_MAX))
+            
+            c_casa_lon = casa_lon_min + ((c_lon - PORTO_LON_MIN) / (PORTO_LON_MAX - PORTO_LON_MIN)) * (casa_lon_max - casa_lon_min)
+            c_casa_lat = casa_lat_min + ((c_lat - PORTO_LAT_MIN) / (PORTO_LAT_MAX - PORTO_LAT_MIN)) * (casa_lat_max - casa_lat_min)
+            
+            casa_pts.append([c_casa_lon, c_casa_lat])
+            
+            if prev_porto_lon is not None and prev_porto_lat is not None:
+                lat1_r = math.radians(prev_porto_lat)
+                lat2_r = math.radians(porto_lat)
+                lon1_r = math.radians(prev_porto_lon)
+                lon2_r = math.radians(porto_lon)
+                dlat = lat2_r - lat1_r
+                dlon = lon2_r - lon1_r
+                a = math.sin(dlat/2)**2 + math.cos(lat1_r) * math.cos(lat2_r) * math.sin(dlon/2)**2
+                a = max(0.0, min(1.0, a))
+                seg_dist = 2 * EARTH_RADIUS_KM * math.asin(math.sqrt(a))
+                trip_distance_km += seg_dist
+                
+            prev_porto_lon = porto_lon
+            prev_porto_lat = porto_lat
+            
+        if not casa_pts:
+            return None
+            
+        start_lon, start_lat = casa_pts[0][0], casa_pts[0][1]
+        best_zone = None
+        min_dist = float('inf')
+        for z in zones:
+            d = (start_lat - z["lat"])**2 + (start_lon - z["lon"])**2
+            if d < min_dist:
+                min_dist = d
+                best_zone = z["zone_id"]
+                
+        return {
+            "trip_distance_km": float(trip_distance_km),
+            "new_polyline": json.dumps(casa_pts),
+            "CASA_ORIGIN_ZONE": best_zone,
+            "trip_duration_sec": len(coords) * 15
+        }
+
+    df = df.withColumn("processed", process_trip_udf(F.col("POLYLINE")))
+    df = df.filter(F.col("processed").isNotNull())
+    df = df.withColumn("trip_distance_km", F.col("processed.trip_distance_km"))
+    df = df.withColumn("POLYLINE", F.col("processed.new_polyline"))
+    df = df.withColumn("CASA_ORIGIN_ZONE", F.col("processed.CASA_ORIGIN_ZONE"))
+    df = df.withColumn("trip_duration_sec", F.col("processed.trip_duration_sec"))
 
     zone_meta = spark.createDataFrame(
         [(z["zone_id"], z["zone_name"], z["zone_type"]) for z in zones],
         ["zone_id", "zone_name", "zone_type"]
     )
-    df_zones = df_zones.join(zone_meta, df_zones.CASA_ORIGIN_ZONE == zone_meta.zone_id, "left")
-    df_zones = df_zones.drop("zone_id").withColumnRenamed("zone_name", "CASA_ORIGIN_ZONE_NAME").withColumnRenamed("zone_type", "CASA_ORIGIN_ZONE_TYPE")
+    df = df.join(zone_meta, df.CASA_ORIGIN_ZONE == zone_meta.zone_id, "left")
+    df = df.drop("zone_id").withColumnRenamed("zone_name", "CASA_ORIGIN_ZONE_NAME").withColumnRenamed("zone_type", "CASA_ORIGIN_ZONE_TYPE")
 
-    base_cols = [c for c in df.columns if c not in {"POLYLINE", "coords"}]
-    df_out = df.select(*base_cols)
-    df_out = df_out.join(temporal.select("TRIP_ID", "hour_of_day", "day_of_week", "year_month"), on="TRIP_ID", how="inner")
-    df_out = df_out.join(trip_distance, on="TRIP_ID", how="inner")
-    df_out = df_out.join(casa_polylines.select("TRIP_ID", "POLYLINE"), on="TRIP_ID", how="inner")
-    df_out = df_out.join(df_zones, on="TRIP_ID", how="left")
+    df_out = df.drop("processed", "trip_datetime")
 
     print(f"Writing {args.output_path} ...")
     df_out.write.mode("overwrite").option("compression", "snappy").partitionBy("year_month").parquet(args.output_path)

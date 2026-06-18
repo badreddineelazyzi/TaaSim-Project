@@ -1,0 +1,9 @@
+fastapi==0.103.1
+uvicorn==0.23.2
+pydantic==2.3.0
+pyspark==3.5.1
+cassandra-driver==3.28.0
+aiokafka==0.8.1
+numpy==1.26.0
+pandas==2.1.0
+locust==2.15.1

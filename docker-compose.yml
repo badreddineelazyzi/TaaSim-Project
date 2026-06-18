@@ -289,6 +289,22 @@ services:
     networks:
       - taasim-net
 
+  api:
+    build: ./api
+    container_name: taasim-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data/ml/models:/app/models
+    environment:
+      - CASSANDRA_HOST=taasim-cassandra
+      - KAFKA_HOST=taasim-kafka:9092
+    depends_on:
+      - cassandra
+      - kafka
+    networks:
+      - taasim-net
+
 volumes:
   minio_data:
   cassandra_data:
