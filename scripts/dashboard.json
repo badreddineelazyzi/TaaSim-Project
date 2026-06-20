@@ -2,7 +2,7 @@
   "dashboard": {
     "uid": "taasim-ops",
     "title": "TaaSim - Real-Time Operations",
-    "tags": ["taasim","milestone4"],
+    "tags": ["taasim","milestone5"],
     "timezone": "browser",
     "schemaVersion": 38,
     "refresh": "10s",
@@ -64,6 +64,118 @@
         "fieldConfig": {
           "defaults": { "custom": { "align": "auto", "displayMode": "auto" } },
           "overrides": [{"matcher":{"id":"byName","options":"ratio"},"properties":[{"id":"custom.displayMode","value":"color-background"}]}]
+        }
+      },
+      {
+        "id": 3,
+        "title": "Total Porto Trips",
+        "type": "stat",
+        "gridPos": { "h": 8, "w": 6, "x": 0, "y": 20 },
+        "datasource": { "type": "hadesarchitect-cassandra-datasource", "uid": "efo5rnez8n2f4e" },
+        "targets": [{
+          "refId": "A",
+          "queryType": "query",
+          "rawQuery": true,
+          "target": "SELECT value, label FROM taasim.kpi_aggregates WHERE kpi_name = 'total_trips' AND category = 'total'",
+          "keyspace": "taasim"
+        }],
+        "fieldConfig": {
+          "defaults": { "unit": "short", "color": { "mode": "fixed" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{"color": "green", "value": null}] } },
+          "overrides": [{"matcher":{"id":"byName","options":"value"},"properties":[{"id":"displayName","value":"Total Trips"}]}]
+        },
+        "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" }
+      },
+      {
+        "id": 4,
+        "title": "Avg Trip Duration",
+        "type": "stat",
+        "gridPos": { "h": 8, "w": 6, "x": 6, "y": 20 },
+        "datasource": { "type": "hadesarchitect-cassandra-datasource", "uid": "efo5rnez8n2f4e" },
+        "targets": [{
+          "refId": "A",
+          "queryType": "query",
+          "rawQuery": true,
+          "target": "SELECT value, label FROM taasim.kpi_aggregates WHERE kpi_name = 'avg_duration_overall' AND category = 'overall'",
+          "keyspace": "taasim"
+        }],
+        "fieldConfig": {
+          "defaults": { "unit": "s", "color": { "mode": "fixed" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{"color": "blue", "value": null}] } },
+          "overrides": [{"matcher":{"id":"byName","options":"value"},"properties":[{"id":"displayName","value":"Avg Duration"}]}]
+        },
+        "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" }
+      },
+      {
+        "id": 5,
+        "title": "Peak Hour Trips",
+        "type": "stat",
+        "gridPos": { "h": 8, "w": 6, "x": 12, "y": 20 },
+        "datasource": { "type": "hadesarchitect-cassandra-datasource", "uid": "efo5rnez8n2f4e" },
+        "targets": [{
+          "refId": "A",
+          "queryType": "query",
+          "rawQuery": true,
+          "target": "SELECT value, label FROM taasim.kpi_aggregates WHERE kpi_name = 'peak_hour_top' AND category = '09:00'",
+          "keyspace": "taasim"
+        }],
+        "fieldConfig": {
+          "defaults": { "unit": "short", "color": { "mode": "fixed" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{"color": "orange", "value": null}] } },
+          "overrides": [{"matcher":{"id":"byName","options":"value"},"properties":[{"id":"displayName","value":"Trips at 09:00"}]}]
+        },
+        "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" }
+      },
+      {
+        "id": 6,
+        "title": "Top Demand Zone",
+        "type": "stat",
+        "gridPos": { "h": 8, "w": 6, "x": 18, "y": 20 },
+        "datasource": { "type": "hadesarchitect-cassandra-datasource", "uid": "efo5rnez8n2f4e" },
+        "targets": [{
+          "refId": "A",
+          "queryType": "query",
+          "rawQuery": true,
+          "target": "SELECT value, label FROM taasim.kpi_aggregates WHERE kpi_name = 'top_zone' AND category = '7'",
+          "keyspace": "taasim"
+        }],
+        "fieldConfig": {
+          "defaults": { "unit": "short", "color": { "mode": "fixed" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{"color": "purple", "value": null}] } },
+          "overrides": [{"matcher":{"id":"byName","options":"value"},"properties":[{"id":"displayName","value":"Hay Mohammadi"}]}]
+        },
+        "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" }
+      },
+      {
+        "id": 7,
+        "title": "Trips per Zone",
+        "type": "table",
+        "gridPos": { "h": 12, "w": 12, "x": 0, "y": 28 },
+        "datasource": { "type": "hadesarchitect-cassandra-datasource", "uid": "efo5rnez8n2f4e" },
+        "targets": [{
+          "refId": "A",
+          "queryType": "query",
+          "rawQuery": true,
+          "target": "SELECT label, value FROM taasim.kpi_aggregates WHERE kpi_name = 'trips_per_zone' ALLOW FILTERING",
+          "keyspace": "taasim"
+        }],
+        "fieldConfig": {
+          "defaults": { "custom": { "align": "auto", "displayMode": "auto" } },
+          "overrides": [{"matcher":{"id":"byName","options":"value"},"properties":[{"id":"custom.displayMode","value":"color-background"}]}]
+        }
+      },
+      {
+        "id": 8,
+        "title": "Weekly Trip Trends",
+        "type": "table",
+        "gridPos": { "h": 12, "w": 12, "x": 12, "y": 28 },
+        "datasource": { "type": "hadesarchitect-cassandra-datasource", "uid": "efo5rnez8n2f4e" },
+        "targets": [{
+          "refId": "A",
+          "queryType": "query",
+          "rawQuery": true,
+          "target": "SELECT category, value FROM taasim.kpi_aggregates WHERE kpi_name = 'weekly_trends' ALLOW FILTERING",
+          "keyspace": "taasim"
+        }],
+        "fieldConfig": {
+          "defaults": { "custom": { "align": "auto", "displayMode": "auto" } },
+          "overrides": [{"matcher":{"id":"byName","options":"value"},"properties":[{"id":"custom.displayMode","value":"color-background"}]}]
         }
       }
     ]
