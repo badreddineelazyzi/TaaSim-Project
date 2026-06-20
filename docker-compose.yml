@@ -20,6 +20,9 @@ services:
       - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
       - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
       - CLUSTER_ID=${KAFKA_CLUSTER_ID:-ZWFhOWQ5ZjAtY2Q5Ny00Yjc0LWExODktNDMwNWI4ZmFhMjA0}
+      - KAFKA_AUTHORIZER_CLASS_NAME=org.apache.kafka.metadata.authorizer.StandardAuthorizer
+      - KAFKA_SUPER_USERS=User:admin
+      - KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND=true
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
       interval: 20s
@@ -308,7 +311,7 @@ services:
       - cassandra
       - kafka
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/docs >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "curl -kfsS https://localhost:8000/docs >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 8

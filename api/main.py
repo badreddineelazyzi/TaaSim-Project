@@ -21,6 +21,8 @@ cassandra_session = None
 kafka_producer = None
 spark = None
 demand_model = None
+features_cache = None  # Zonal features cache loaded at startup
+predict_df_cache = None  # Cached single-row DataFrame template
 
 
 class TripRequest(BaseModel):
@@ -82,6 +84,59 @@ async def startup_event():
 
         model_path = "/app/models/demand_v1"
         demand_model = PipelineModel.load(model_path)
+
+        # Pre-load features from S3 into cache and pre-compute all predictions
+        global features_cache, predict_df_cache
+        try:
+            features_df = spark.read.parquet("s3a://ml-data/features/")
+            features_cache = features_df.collect()
+            print(f"Loaded {len(features_cache)} feature rows into cache")
+            # Pre-compute predictions for all 16 zones at startup
+            from pyspark.sql.types import StructType, StructField, DoubleType
+            schema = StructType([StructField(c, DoubleType(), True) for c in FEATURE_COLS])
+            predict_df_cache = {}
+            for zone_id in range(1, 17):
+                zone_rows = [r for r in features_cache if r["zone_id"] == zone_id]
+                if zone_rows:
+                    zone_rows.sort(key=lambda r: r["time_slot_30min"], reverse=True)
+                    latest = zone_rows[0]
+                    default_dt = datetime.utcnow()
+                    def safe_get(row, key, default):
+                        try:
+                            val = row[key]
+                            return float(val) if val is not None else default
+                        except (KeyError, TypeError, ValueError):
+                            return default
+                    feature_values = [
+                        float(default_dt.hour),
+                        float(default_dt.weekday()),
+                        float(1 if default_dt.weekday() >= 5 else 0),
+                        float(1 if default_dt.weekday() == 4 else 0),
+                        safe_get(latest, "population_density", 5000.0),
+                        safe_get(latest, "is_residential", 0),
+                        safe_get(latest, "is_commercial", 0),
+                        safe_get(latest, "is_industrial", 0),
+                        safe_get(latest, "is_transit_hub", 0),
+                        safe_get(latest, "temperature_2m", 20.0),
+                        safe_get(latest, "rain", 0.0),
+                        safe_get(latest, "is_raining", 0),
+                        safe_get(latest, "temp_cold", 0),
+                        safe_get(latest, "temp_hot", 0),
+                        safe_get(latest, "temp_mild", 1),
+                        safe_get(latest, "demand_lag_1d", 10.0),
+                        safe_get(latest, "demand_lag_7d", 12.0),
+                        safe_get(latest, "rolling_7d_mean", 11.5),
+                        float(zone_id)
+                    ]
+                    row_dict = {FEATURE_COLS[i]: feature_values[i] for i in range(len(FEATURE_COLS))}
+                    pred_row = Row(**row_dict)
+                    df = spark.createDataFrame([pred_row], schema=schema)
+                    preds = demand_model.transform(df)
+                    predict_df_cache[zone_id] = round(float(preds.select("prediction").first()[0]), 2)
+            print(f"Pre-computed {len(predict_df_cache)} zone predictions: {predict_df_cache}")
+        except Exception as e:
+            print(f"Warning: Could not pre-load features from S3 ({e})")
+            features_cache = None
     except Exception as e:
         print(f"Warning: Spark/Model loading failed - {e}")
 
@@ -142,7 +197,7 @@ async def get_vehicles_in_zone(zone_id: int):
     if not cassandra_session:
         raise HTTPException(status_code=503, detail="Database not connected")
 
-    query = "SELECT vehicle_id, location, event_time FROM vehicle_positions WHERE zone_id = %s"
+    query = "SELECT taxi_id, lat, lon, speed, event_time FROM vehicle_positions WHERE city = 'casablanca' AND zone_id = %s ALLOW FILTERING"
     rows = cassandra_session.execute(query, (zone_id,))
 
     vehicles = []
@@ -151,8 +206,9 @@ async def get_vehicles_in_zone(zone_id: int):
     for row in rows:
         if (now - row.event_time).total_seconds() <= 30:
             vehicles.append({
-                "vehicle_id": row.vehicle_id,
-                "location": row.location
+                "vehicle_id": row.taxi_id,
+                "location": {"lat": row.lat, "lon": row.lon},
+                "speed": row.speed
             })
 
     return {"zone_id": zone_id, "active_vehicles": vehicles}
@@ -163,69 +219,50 @@ async def predict_demand(req: ForecastRequest):
     if not spark or not demand_model:
         raise HTTPException(status_code=503, detail="ML Model not loaded")
 
-    dt = datetime.strptime(req.datetime, "%Y-%m-%d %H:%M:%S")
-    time_slot = dt.strftime("%Y-%m-%d %H:00:00")
+    # Use pre-computed cache for fast response
+    predicted_demand = predict_df_cache.get(req.zone_id) if predict_df_cache else None
 
-    # Load latest features from S3 feature store for the requested zone
-    try:
-        features_df = spark.read.parquet("s3a://ml-data/features/")
-        zone_features = features_df.filter(F.col("zone_id") == req.zone_id)
-        latest = zone_features.orderBy(F.col("time_slot_30min").desc()).first()
-    except Exception as e:
-        print(f"Warning: Could not load features from S3 ({e}), using fallback defaults")
+    if predicted_demand is None:
+        # Fallback: compute on-the-fly
+        dt = datetime.strptime(req.datetime, "%Y-%m-%d %H:%M:%S")
         latest = None
-
-    if latest is not None:
-        feature_values = [
-            dt.hour,                                     # hour_of_day
-            dt.weekday(),                                # day_of_week
-            1 if dt.weekday() >= 5 else 0,               # is_weekend
-            1 if dt.weekday() == 4 else 0,               # is_friday
-            float(latest["population_density"]),          # population_density
-            float(latest["is_residential"]),              # is_residential
-            float(latest["is_commercial"]),               # is_commercial
-            float(latest["is_industrial"]),               # is_industrial
-            float(latest["is_transit_hub"]),              # is_transit_hub
-            float(latest["temperature_2m"]),              # temperature_2m
-            float(latest["rain"]),                        # rain
-            float(latest["is_raining"]),                  # is_raining
-            float(latest["temp_cold"]),                   # temp_cold
-            float(latest["temp_hot"]),                    # temp_hot
-            float(latest["temp_mild"]),                   # temp_mild
-            float(latest["demand_lag_1d"]),               # demand_lag_1d
-            float(latest["demand_lag_7d"]),               # demand_lag_7d
-            float(latest["rolling_7d_mean"]),             # rolling_7d_mean
-            float(req.zone_id)                            # zone_id
-        ]
-    else:
-        feature_values = [
-            dt.hour,
-            dt.weekday(),
-            1 if dt.weekday() >= 5 else 0,
-            1 if dt.weekday() == 4 else 0,
-            5000.0,
-            1,
-            0,
-            0,
-            0,
-            20.0,
-            0.0,
-            0,
-            0,
-            0,
-            1,
-            10.0,
-            12.0,
-            11.5,
-            float(req.zone_id)
-        ]
-
-    row_dict = {FEATURE_COLS[i]: feature_values[i] for i in range(len(FEATURE_COLS))}
-    pred_row = Row(**row_dict)
-    df = spark.createDataFrame([pred_row])
-    predictions = demand_model.transform(df)
-    predicted_demand = predictions.select("prediction").first()[0]
-    predicted_demand = round(float(predicted_demand), 2)
+        if features_cache is not None:
+            zone_rows = [r for r in features_cache if r["zone_id"] == req.zone_id]
+            if zone_rows:
+                zone_rows.sort(key=lambda r: r["time_slot_30min"], reverse=True)
+                latest = zone_rows[0]
+        if latest is not None:
+            feature_values = [float(v) for v in [
+                dt.hour, dt.weekday(),
+                1 if dt.weekday() >= 5 else 0,
+                1 if dt.weekday() == 4 else 0,
+                latest.get("population_density", 5000.0),
+                latest.get("is_residential", 0),
+                latest.get("is_commercial", 0),
+                latest.get("is_industrial", 0),
+                latest.get("is_transit_hub", 0),
+                latest.get("temperature_2m", 20.0),
+                latest.get("rain", 0.0),
+                latest.get("is_raining", 0),
+                latest.get("temp_cold", 0),
+                latest.get("temp_hot", 0),
+                latest.get("temp_mild", 1),
+                latest.get("demand_lag_1d", 10.0),
+                latest.get("demand_lag_7d", 12.0),
+                latest.get("rolling_7d_mean", 11.5),
+                float(req.zone_id)
+            ]]
+        else:
+            feature_values = [float(v) for v in [
+                dt.hour, dt.weekday(), 0, 0,
+                5000.0, 1, 0, 0, 0,
+                20.0, 0.0, 0, 0, 0, 1,
+                10.0, 12.0, 11.5, float(req.zone_id)
+            ]]
+        from pyspark.sql.types import StructType, StructField, DoubleType
+        schema = StructType([StructField(c, DoubleType(), True) for c in FEATURE_COLS])
+        df = spark.createDataFrame([Row(**{FEATURE_COLS[i]: feature_values[i] for i in range(len(FEATURE_COLS))})], schema=schema)
+        predicted_demand = round(float(demand_model.transform(df).select("prediction").first()[0]), 2)
 
     if cassandra_session:
         try:
