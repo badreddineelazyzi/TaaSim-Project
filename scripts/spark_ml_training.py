@@ -1,4 +1,5 @@
 import argparse
+import os
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.ml.feature import VectorAssembler, StandardScaler
@@ -7,55 +8,80 @@ from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
 from pyspark.ml import Pipeline
 
-def build_spark():
-    return (
-        SparkSession.builder.master("local[*]")
-        .appName("ML_DemandForecasting")
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Spark ML Training")
+    parser.add_argument("--features-path", default="s3a://ml-data/features/")
+    parser.add_argument("--model-output-path", default="s3a://ml-data/models/demand_v1/")
+    parser.add_argument("--s3-endpoint", default="http://minio:9000")
+    parser.add_argument("--s3-access-key", default="minioadmin")
+    parser.add_argument("--s3-secret-key", default="minioadmin123")
+    return parser.parse_args()
+
+
+def build_spark(args):
+    spark = SparkSession.builder \
+        .appName("ML_DemandForecasting") \
+        .config("spark.hadoop.fs.s3a.endpoint", args.s3_endpoint) \
+        .config("spark.hadoop.fs.s3a.access.key", args.s3_access_key) \
+        .config("spark.hadoop.fs.s3a.secret.key", args.s3_secret_key) \
+        .config("spark.hadoop.fs.s3a.path.style.access", "true") \
+        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
+        .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
+        .config("spark.sql.shuffle.partitions", "8") \
         .getOrCreate()
-    )
+    return spark
+
 
 def main():
-    spark = build_spark()
+    args = parse_args()
+    spark = build_spark(args)
     spark.sparkContext.setLogLevel("WARN")
 
-    input_path = "file:///opt/spark/work-dir/data/ml-data/features/"
-    model_output_path = "file:///opt/spark/work-dir/data/ml/models/demand_v1/"
+    print(f"Reading features from {args.features_path}...")
+    df = spark.read.parquet(args.features_path)
+    print(f"Feature rows: {df.count()}, columns: {len(df.columns)}")
 
-    print(f"Reading features from {input_path}...")
-    df = spark.read.parquet(input_path)
-    
-    # Cast boolean features to integer so VectorAssembler can handle them
-    # Some of them might already be integers in the mock data, so we ignore errors
+    year_months = sorted(df.select("year_month").distinct().rdd.flatMap(lambda x: x).collect())
+    print(f"Available year_months: {year_months}")
 
-    print("Splitting data temporally...")
-    # Recreate year_month from time_slot_30min for the split
-    df = df.withColumn("year_month", F.substring(F.col("time_slot_30min"), 1, 7))
+    train_months = [ym for ym in year_months if ym <= "2013-09"]
+    test_months = [ym for ym in year_months if ym >= "2013-10"]
 
-    # Using 2013-08 for training and 2013-09 for testing based on our mock data
-    train_df = df.filter(F.col("year_month") == "2013-08")
-    test_df = df.filter(F.col("year_month") == "2013-09")
-    
-    print(f"Train samples: {train_df.count()}, Test samples: {test_df.count()}")
+    if not train_months or not test_months:
+        print("WARNING: Using default temporal split.")
+        train_df = df.filter(F.col("year_month") <= "2013-09")
+        test_df = df.filter(F.col("year_month") >= "2013-10")
+    else:
+        train_df = df.filter(F.col("year_month").isin(train_months))
+        test_df = df.filter(F.col("year_month").isin(test_months))
 
-    # Define numeric features
+    train_count = train_df.count()
+    test_count = test_df.count()
+    print(f"Train samples: {train_count}, Test samples: {test_count}")
+
     feature_cols = [
-        "hour_of_day", "day_of_week", "is_weekend", "is_friday", 
+        "hour_of_day", "day_of_week", "is_weekend", "is_friday",
         "population_density", "is_residential", "is_commercial", "is_industrial", "is_transit_hub",
         "temperature_2m", "rain", "is_raining", "temp_cold", "temp_hot", "temp_mild",
         "demand_lag_1d", "demand_lag_7d", "rolling_7d_mean", "zone_id"
     ]
 
+    for col in feature_cols:
+        train_df = train_df.withColumn(col, F.col(col).cast("double"))
+        test_df = test_df.withColumn(col, F.col(col).cast("double"))
+
     print("Constructing MLlib Pipeline...")
     assembler = VectorAssembler(inputCols=feature_cols, outputCol="rawFeatures", handleInvalid="skip")
     scaler = StandardScaler(inputCol="rawFeatures", outputCol="scaledFeatures", withStd=True, withMean=False)
-    
+
     gbt = GBTRegressor(
         featuresCol="scaledFeatures",
         labelCol="demand_count",
         maxIter=50,
         seed=42
     )
-    
+
     pipeline = Pipeline(stages=[assembler, scaler, gbt])
 
     print("Setting up Cross-Validation...")
@@ -80,56 +106,57 @@ def main():
     print("Training model...")
     cvModel = cv.fit(train_df)
 
-    print("Evaluating model...")
-    predictions = cvModel.transform(test_df)
-    
-    # Calculate RMSE and MAE
+    bestModel = cvModel.bestModel
+
+    print("Evaluating model on test set...")
+    predictions = bestModel.transform(test_df)
+
     rmse = evaluator.evaluate(predictions)
     mae_evaluator = RegressionEvaluator(labelCol="demand_count", predictionCol="prediction", metricName="mae")
     mae = mae_evaluator.evaluate(predictions)
-    
+
     print(f"Model RMSE: {rmse:.4f}")
     print(f"Model MAE: {mae:.4f}")
 
-    # Baseline: demand_lag_7d
     baseline_evaluator = RegressionEvaluator(
         labelCol="demand_count",
         predictionCol="demand_lag_7d",
         metricName="rmse"
     )
-    baseline_rmse = baseline_evaluator.evaluate(test_df.withColumn("demand_lag_7d", F.col("demand_lag_7d").cast("double")))
+    baseline_rmse = baseline_evaluator.evaluate(
+        test_df.withColumn("demand_lag_7d", F.col("demand_lag_7d").cast("double"))
+    )
     print(f"Baseline RMSE (7-day lag): {baseline_rmse:.4f}")
-    
+
     if rmse < baseline_rmse:
         print("SUCCESS: Model outperformed the baseline!")
     else:
         print("WARNING: Model did NOT outperform the naive baseline.")
 
     print("\nPer-Zone Evaluation:")
-    # Evaluate per zone
-    zone_metrics = predictions.groupBy("CASA_ORIGIN_ZONE_NAME").agg(
+    zone_metrics = predictions.groupBy("zone_id").agg(
         F.sqrt(F.mean(F.pow(F.col("demand_count") - F.col("prediction"), 2))).alias("model_rmse"),
         F.sqrt(F.mean(F.pow(F.col("demand_count") - F.col("demand_lag_7d"), 2))).alias("baseline_rmse")
     )
-    zone_metrics.show(truncate=False)
+    zone_metrics.orderBy("zone_id").show(truncate=False)
 
     print("\nExtracting Feature Importances...")
-    bestPipeline = cvModel.bestModel
-    gbt_model = bestPipeline.stages[-1]
+    gbt_model = bestModel.stages[-1]
     importances = gbt_model.featureImportances
-    
+
     importance_list = [(feature_cols[i], float(importances[i])) for i in range(len(feature_cols))]
     importance_list.sort(key=lambda x: x[1], reverse=True)
-    
-    print("Top Predictors:")
+
+    print("Top 5 Predictors:")
     for i, (feat, imp) in enumerate(importance_list[:5]):
         print(f"{i+1}. {feat}: {imp:.4f}")
-        
-    print(f"\nSaving model to {model_output_path}...")
-    cvModel.write().overwrite().save(model_output_path)
-    
+
+    print(f"\nSaving best model to {args.model_output_path}...")
+    bestModel.write().overwrite().save(args.model_output_path)
+
     print("Done - ML Pipeline completed.")
     spark.stop()
+
 
 if __name__ == "__main__":
     main()

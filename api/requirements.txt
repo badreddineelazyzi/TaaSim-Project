@@ -7,3 +7,4 @@ aiokafka==0.8.1
 numpy==1.26.0
 pandas==2.1.0
 locust==2.15.1
+python-jose[cryptography]==3.3.0
