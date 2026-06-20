@@ -12,10 +12,11 @@ RUN mkdir -p /opt/spark/jars && \
 
 WORKDIR /app
 
-COPY main.py auth.py ./
+COPY main.py auth.py cert.pem key.pem ./
+RUN chown spark:spark cert.pem key.pem && chmod 600 cert.pem key.pem
 
 EXPOSE 8000
 
 USER spark
 
-CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--ssl-keyfile", "/app/key.pem", "--ssl-certfile", "/app/cert.pem"]

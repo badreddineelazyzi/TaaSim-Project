@@ -1,0 +1,140 @@
+{
+  "uid": "taasim-demo",
+  "title": "TaaSim - Demo Dashboard",
+  "tags": ["demo", "final"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Vehicle Map",
+      "type": "geomap",
+      "gridPos": { "h": 14, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "hadesarchitect-cassandra-datasource", "uid": "efo5rnez8n2f4e" },
+      "options": {
+        "view": { "id": "zero", "lat": 33.573, "lon": -7.589, "zoom": 11 },
+        "controls": { "showZoom": true, "showAttribution": false },
+        "basemap": {
+          "type": "xyz",
+          "name": "ESRI World Street Map",
+          "config": {
+            "url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
+          }
+        },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "Vehicles",
+            "location": { "mode": "coords", "latitude": "lat", "longitude": "lon" },
+            "color": { "field": "status" },
+            "config": { "showLegend": true }
+          }
+        ]
+      },
+      "targets": [{
+        "refId": "A",
+        "queryType": "query",
+        "rawQuery": true,
+        "target": "SELECT event_time AS time, lat, lon, status, taxi_id FROM taasim.vehicle_positions WHERE city='casablanca' PER PARTITION LIMIT 1 ALLOW FILTERING",
+        "keyspace": "taasim"
+      }]
+    },
+    {
+      "id": 2,
+      "title": "Demand Heatmap",
+      "type": "geomap",
+      "gridPos": { "h": 14, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "hadesarchitect-cassandra-datasource", "uid": "efo5rnez8n2f4e" },
+      "options": {
+        "view": { "id": "zero", "lat": 33.573, "lon": -7.589, "zoom": 11 },
+        "controls": { "showZoom": true, "showAttribution": false },
+        "basemap": {
+          "type": "xyz",
+          "name": "ESRI World Street Map",
+          "config": {
+            "url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
+          }
+        },
+        "layers": [
+          {
+            "type": "heatmap",
+            "name": "Demand Ratio",
+            "location": { "mode": "coords", "latitude": "centroid_lat", "longitude": "centroid_lon" },
+            "color": { "field": "ratio" },
+            "config": { "radius": 25, "blur": 20, "weight": { "field": "ratio", "fixed": 1, "min": 0, "max": 5 } }
+          }
+        ]
+      },
+      "targets": [{
+        "refId": "A",
+        "queryType": "query",
+        "rawQuery": true,
+        "target": "SELECT window_start AS time, zone_id, centroid_lat, centroid_lon, ratio FROM taasim.demand_zones WHERE city='casablanca' PER PARTITION LIMIT 1 ALLOW FILTERING",
+        "keyspace": "taasim"
+      }]
+    },
+    {
+      "id": 3,
+      "title": "KPIs",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "hadesarchitect-cassandra-datasource", "uid": "efo5rnez8n2f4e" },
+      "targets": [{
+        "refId": "A",
+        "queryType": "query",
+        "rawQuery": true,
+        "target": "SELECT label, value FROM taasim.kpi_aggregates WHERE kpi_name IN ('trips_24h', 'avg_eta', 'match_rate_5s', 'top_zone') ALLOW FILTERING",
+        "keyspace": "taasim"
+      }],
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "auto" }
+    },
+    {
+      "id": 4,
+      "title": "ML Forecast vs Actual Demand",
+      "type": "barchart",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 20 },
+      "datasource": { "type": "hadesarchitect-cassandra-datasource", "uid": "efo5rnez8n2f4e" },
+      "targets": [{
+        "refId": "A",
+        "queryType": "query",
+        "rawQuery": true,
+        "target": "SELECT window_start AS time, CAST(zone_id AS text) AS zone, pending_requests AS actual, forecasted_demand AS predicted FROM taasim.demand_zones WHERE city='casablanca' PER PARTITION LIMIT 1 ALLOW FILTERING",
+        "keyspace": "taasim"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 90,
+            "lineWidth": 1,
+            "gradientMode": "opacity",
+            "axisPlacement": "left"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "actual" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "dark-blue" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "predicted" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "xField": "zone",
+        "barWidth": 0.85,
+        "groupWidth": 0.75,
+        "showValue": "always",
+        "legend": { "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      }
+    }
+  ]
+}
